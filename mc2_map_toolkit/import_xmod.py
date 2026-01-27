@@ -195,6 +195,12 @@ def import_xmod(filepath, has_xbcpv = True):
                             nodetree.nodes.remove(node)
                             break
 
+                    material_output_node = None
+                    for node in nodetree.nodes:
+                        if node.type == 'OUTPUT_MATERIAL':
+                            material_output_node = node
+                            break
+
                     shader_node = nodetree.nodes.new('ShaderNodeGroup')
                     shader_node.node_tree = load_node_group('mc2_base_material')#, 'node_groups') #bpy.data.node_groups['mc2_base_material'] # Import from external file
                     shader_node.location = (50, 300)
@@ -204,7 +210,8 @@ def import_xmod(filepath, has_xbcpv = True):
                     tex_node.location = (-300, 300)
 
                     nodetree.links.new(tex_node.outputs[0], shader_node.inputs[0])
-                    nodetree.links.new(shader_node.outputs[2], nodetree.nodes.get('Material Output').inputs[0])
+                    if material_output_node != None:
+                        nodetree.links.new(shader_node.outputs[2], material_output_node.inputs[0])
 
                     #newmat_wrapper = node_shader_utils.PrincipledBSDFWrapper(newmat, is_readonly=False)
                     #newmat_wrapper.base_color = mod_mat.diffuse
