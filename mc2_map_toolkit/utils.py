@@ -4,6 +4,7 @@ import os
 import shutil
 from bpy_extras.io_utils import axis_conversion
 
+# Collection utils
 def create_get_collection(col_name):
     found = False
     for c in bpy.data.collections:
@@ -36,37 +37,14 @@ def link_col_to_col(col_from, col_to):
     bpy.context.scene.collection.children.unlink(col_from)
     col_to.children.link(col_from)
 
-def select_obj(o):
-    o.select_set(True)
-    bpy.context.view_layer.objects.active = o
+def get_parent_collection_names(collection, parent_names):
+    for parent_collection in bpy.data.collections:
+        if collection.name in parent_collection.children.keys():
+            parent_names.append(parent_collection.name)
+            get_parent_collection_names(parent_collection, parent_names)
+    return
 
-def round_vector3(vector3):
-    def round_float(f):
-        rounded = round(f, 6)
-        return 0.0 if abs(rounded) < 1e-6 else rounded
-    x, y, z = vector3
-    return (round_float(x), round_float(y), round_float(z))
-
-def translate_vector3(vector3):
-    x, y, z = vector3
-    return (-x, z, y)
-
-def vector3_to_string(vector3, separator):
-    x, y, z = vector3
-    return '%.6f' % x + separator + '%.6f' % y + separator + '%.6f' % z
-
-def translate_uv(uv):
-    return (uv[0], 1 - uv[1])
-
-def bytes_to_int(bytes) -> int:
-    return int.from_bytes(bytes, byteorder='little')
-
-def write_file(filepath, content):
-    with open (filepath, 'w') as file:
-        for l in content:
-            file.write("%s" % l)
-
-def calc_emin_emax(col_inst):
+def calc_col_inst_emin_emax(col_inst):
     # Calculate extents bounding box of a collection instance,
     # returns emin = upper left bottom corner, emax = lower right top corner,
     # assuming blender orientation x - left, y - bottom, z - top.
@@ -86,14 +64,62 @@ def calc_emin_emax(col_inst):
         min_corner = mathutils.Vector((min(p[i] for p in verts_world) for i in range(3)))
         max_corner = mathutils.Vector((max(p[i] for p in verts_world) for i in range(3)))
 
-        emin = translate_vector3((max_corner.x, min_corner.y, min_corner.z))
-        emax = translate_vector3((min_corner.x, max_corner.y, max_corner.z))
+        emin = convert_vec3((max_corner.x, min_corner.y, min_corner.z))
+        emax = convert_vec3((min_corner.x, max_corner.y, max_corner.z))
 
         return emin, emax
 
     except:
         print(col_inst.name)
-        return (0, 0, 0), (0, 0, 0) # Janky shi
+        return (0, 0, 0), (0, 0, 0) # Jank
+
+def is_col_inst(obj):
+    if obj and obj.type == 'EMPTY' and obj.instance_type == 'COLLECTION':
+        return True
+    return False
+
+def fmt_zero(v):
+    if abs(v) < 1e-6:
+        return "0.000000"
+    return f"{v:.6f}"
+
+def is_local_view(context):
+    for area in context.window.screen.areas:
+        if area.type == 'VIEW_3D':
+            space = area.spaces.active
+            if space.local_view is not None:
+                return True
+    return False
+
+def select_obj(o):
+    o.select_set(True)
+    bpy.context.view_layer.objects.active = o
+
+def round_vec3(vector3):
+    def round_float(f):
+        rounded = round(f, 6)
+        return 0.0 if abs(rounded) < 1e-6 else rounded
+    x, y, z = vector3
+    return (round_float(x), round_float(y), round_float(z))
+
+def convert_vec3(vector3):
+    x, y, z = vector3
+    return (-x, z, y)
+
+def vec3_to_string(vector3, separator):
+    x, y, z = vector3
+    return '%.6f' % x + separator + '%.6f' % y + separator + '%.6f' % z
+
+def convert_uv(uv):
+    return (uv[0], 1 - uv[1])
+
+def bytes_to_int(bytes) -> int:
+    return int.from_bytes(bytes, byteorder='little')
+
+def write_file(filepath, content):
+    with open (filepath, 'w') as file:
+        for l in content:
+            file.write("%s" % l)
 
 def to_matrix34(matrix): # convert_to_matrix34?
     matrix = matrix.copy()

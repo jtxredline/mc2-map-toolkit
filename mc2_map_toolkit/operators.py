@@ -3,8 +3,10 @@ import os
 import shutil
 import math, mathutils
 from bpy_extras.io_utils import axis_conversion
-from .utils import create_get_collection, link_col_to_col, set_active_collection, calc_emin_emax, to_matrix34, write_file, make_backup, round_vector3, translate_vector3, vector3_to_string
+from .utils import create_get_collection, link_col_to_col, set_active_collection, get_parent_collection_names, calc_col_inst_emin_emax
+from .utils import to_matrix34, write_file, make_backup, round_vec3, convert_vec3, vec3_to_string, is_col_inst
 from .import_xmod import import_xmod
+from .bound import export_otgrid_bnd, import_bnd #, export_quadtree_bnd
 
 class MC2_OT_SetupScene(bpy.types.Operator):
     bl_idname = "mc2.setup_scene"
@@ -35,9 +37,10 @@ class MC2_OT_SetupScene(bpy.types.Operator):
         city_col = create_get_collection(map_name)
 
         city_source_col = create_get_collection(map_name + '_source')
+        # Disable source collection
+        #context.view_layer.layer_collection.children[city_source_col.name].exclude = True
+
         link_col_to_col(city_source_col, city_col)
-        #city_source_col.hide_viewport = True
-        #city_source_col.hide_render = True
 
         city_hoods_col = create_get_collection(map_name + '_hoods')
         link_col_to_col(city_hoods_col, city_col)
@@ -59,6 +62,9 @@ class MC2_OT_SetupScene(bpy.types.Operator):
 
         city_props_gfx = create_get_collection(map_name + '_props_gfx') # Visual-only props collection
         link_col_to_col(city_props_gfx, city_prop_col)
+
+        bound_col = create_get_collection(map_name + '_bound')
+        link_col_to_col(bound_col, city_col)
 
         # Setup camera settings
         context.space_data.lens = 70
@@ -118,12 +124,23 @@ class MC2_OT_RestoreBackup(bpy.types.Operator):
     def execute(self, context):
         mc2_dir = context.scene.mc2_props.mc2_dir
         map_name = context.scene.mc2_props.map_name
+
+        # City folder
         city_path = os.path.join(mc2_dir, 'city', map_name)
         city_backup_path = os.path.join(city_path, 'backup')
 
         for backup in os.listdir(city_backup_path):
             backup_path = os.path.join(city_backup_path, backup)
             file_path = os.path.join(city_path, backup)
+            shutil.copyfile(backup_path, file_path)
+        
+        # Bound folder
+        bound_path = os.path.join(mc2_dir, 'bound')
+        bound_backup_path = os.path.join(bound_path, 'backup')
+
+        for backup in os.listdir(bound_backup_path):
+            backup_path = os.path.join(bound_backup_path, backup)
+            file_path = os.path.join(bound_path, backup)
             shutil.copyfile(backup_path, file_path)
 
         self.report({'INFO'}, "Restored backup")
@@ -198,7 +215,7 @@ class MC2_OT_ImportCityModels(bpy.types.Operator):
                                 model = import_xmod(fp, has_xbcpv = False)
                             
                         else: print(fp + ' does not exist.')
-        
+
         self.report({'INFO'}, f"Imported {map_name} city models")
         return {'FINISHED'}
 
@@ -479,7 +496,7 @@ class MC2_OT_ImportProps(bpy.types.Operator):
                                 if os.path.exists(part_fp):
                                     part_xmod = import_xmod(part_fp)
                                     part_xmod.name = part[0]
-                                    part_xmod.location = translate_vector3(part[1])
+                                    part_xmod.location = convert_vec3(part[1])
 
                                     if 'particle' or 'breakpart' in part[0]: # Hide particles and breakparts
                                         part_xmod.hide_viewport = True
@@ -487,13 +504,40 @@ class MC2_OT_ImportProps(bpy.types.Operator):
                                 else:
                                     part_empty = bpy.data.objects.new(part[0], None) # Add part as empty if xmod was not found
                                     prop_col.objects.link(part_empty)
-                                    part_empty.location = translate_vector3(part[1])
+                                    part_empty.location = convert_vec3(part[1])
 
                     else: break
 
-        #Try to contain needed info directly in the prop collections, custom properties etc. straight away, instead of messing with PropDef
+        # TODO: Try to contain needed info directly in the prop collections, custom properties etc. straight away, instead of messing with PropDef
 
         self.report({'INFO'}, f"Imported {map_name} props")
+        return {'FINISHED'}
+
+class MC2_OT_ImportBounds(bpy.types.Operator):
+    bl_idname = "mc2.import_bounds"
+    bl_label = "Import Bounds"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        mc2_dir = context.scene.mc2_props.mc2_dir
+        map_name = context.scene.mc2_props.map_name
+        bnd_path = os.path.join(mc2_dir, 'bound', map_name + '.bnd')
+        bound_col = create_get_collection(map_name + '_bound')
+        set_active_collection(bound_col.name)
+
+        # Main .bnd file
+        if os.path.exists(bnd_path):
+            bnd = import_bnd(bnd_path)
+            self.report({'INFO'}, f"Imported {map_name}.bnd")
+        else: print(map_name + '.bnd not found')
+
+        # Optional quad_0 bnd
+        bnd_quad_0_path = os.path.join(mc2_dir, 'bound', map_name + '_quad_0.bnd')
+        if os.path.exists(bnd_quad_0_path):
+            quad_0 = import_bnd(bnd_quad_0_path)
+            self.report({'INFO'}, f"Imported {map_name}_quad_0.bnd")
+        else: print(map_name + '_quad_0.bnd not found')
+
         return {'FINISHED'}
 
 class MC2_OT_SpawnCityModels(bpy.types.Operator):
@@ -642,6 +686,7 @@ class MC2_OT_SpawnProps(bpy.types.Operator):
         city_path = os.path.join(mc2_dir, 'city', map_name)
 
         # Get collections
+        city_source_col = create_get_collection(map_name + '_source')
         prop_templates_col = create_get_collection(map_name + '_prop_templates')
         props_col = create_get_collection(map_name + '_props')
         props_fixed_col = create_get_collection(map_name + '_props_fixed')
@@ -714,13 +759,78 @@ class MC2_OT_SpawnProps(bpy.types.Operator):
                     
             # Remove temp obj
             bpy.data.objects.remove(temp_obj)
-        
-        # Disable source collection at the end, needs a better spot
-        city_source_col = create_get_collection(map_name + '_source')
-        city_source_col.hide_viewport = True
-        city_source_col.hide_render = True
 
+        # Disable source collection (Could be a reusable operator)
+        names = []
+        get_parent_collection_names(city_source_col, names)
+        names = names[::-1]
+        col = context.view_layer.layer_collection
+        for name in names:
+            col = col.children[name]
+        col.children[city_source_col.name].exclude = True
+        
         self.report({'INFO'}, f"Spawned {map_name} props")
+        return {'FINISHED'}
+
+class MC2_OT_OpenCollection(bpy.types.Operator):
+    bl_idname = "mc2.open_collection"
+    bl_label = "Open Collection"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = bpy.context.object
+        if is_col_inst(obj):
+            return True
+        return False
+
+    def execute(self, context):
+        parent_col = context.object.instance_collection
+        col_objs = bpy.data.collections[parent_col.name].all_objects
+
+        bpy.ops.object.select_all(action='DESELECT')
+
+        names = []
+        get_parent_collection_names(parent_col, names)
+        names = names[::-1]
+
+        col = context.view_layer.layer_collection
+        for name in names:
+            col = col.children[name]
+
+        col.children[parent_col.name].exclude = False
+
+        for obj in col_objs:
+            obj.select_set(True)
+
+        bpy.ops.view3d.localview()
+
+        bpy.ops.object.select_all(action='DESELECT')
+        col_objs[0].select_set(True)
+        context.view_layer.objects.active = col_objs[0]
+        
+        return {'FINISHED'}
+
+class MC2_OT_CloseCollection(bpy.types.Operator):
+    bl_idname = "mc2.close_collection"
+    bl_label = "Close Collection"
+    bl_options = {'REGISTER', 'UNDO'}
+    
+    def execute(self, context):
+        parent_col = context.object.users_collection[0]
+
+        names = []
+        get_parent_collection_names(parent_col, names)
+        names = names[::-1]
+
+        col = context.view_layer.layer_collection
+        for name in names:
+            col = col.children[name]
+
+        col.children[parent_col.name].exclude = True
+
+        bpy.ops.view3d.localview()
+
         return {'FINISHED'}
 
 class MC2_OT_ExportHoods(bpy.types.Operator):
@@ -762,7 +872,7 @@ class MC2_OT_ExportHoods(bpy.types.Operator):
                 title = 'unique_component ' + str(ctr) + ' {' + n
                 name = t + 'name: ' + unique.name + n
                 
-                emin, emax = calc_emin_emax(unique)
+                emin, emax = calc_col_inst_emin_emax(unique)
                 emin = t + 'emin ' + ('%.6f %.6f %.6f' % emin[:]) + n # TODO: Better way to print a Vector?
                 emax = t + 'emax ' + ('%.6f %.6f %.6f' % emax[:]) + n + e
                 
@@ -789,14 +899,14 @@ class MC2_OT_ExportHoods(bpy.types.Operator):
                 row3 = (matrix[0][2], matrix[1][2], matrix[2][2])
                 row4 = (matrix[0][3], matrix[1][3], matrix[2][3])
 
-                row1 = t + vector3_to_string(round_vector3(row1), '\t') + n
-                row2 = t + vector3_to_string(round_vector3(row2), '\t') + n
-                row3 = t + vector3_to_string(round_vector3(row3), '\t') + n
-                row4 = t + vector3_to_string(round_vector3(row4), '\t') + n
+                row1 = t + vec3_to_string(round_vec3(row1), '\t') + n
+                row2 = t + vec3_to_string(round_vec3(row2), '\t') + n
+                row3 = t + vec3_to_string(round_vec3(row3), '\t') + n
+                row4 = t + vec3_to_string(round_vec3(row4), '\t') + n
 
-                emin, emax = calc_emin_emax(inst)
-                emin = t + 'emin ' + vector3_to_string(round_vector3(emin), ' ') + n
-                emax = t + 'emax ' + vector3_to_string(round_vector3(emax), ' ')+ n + e
+                emin, emax = calc_col_inst_emin_emax(inst)
+                emin = t + 'emin ' + vec3_to_string(round_vec3(emin), ' ') + n
+                emax = t + 'emax ' + vec3_to_string(round_vec3(emax), ' ')+ n + e
 
                 lines.append(title)
                 lines.append(type)
@@ -884,7 +994,7 @@ class MC2_OT_ExportProps(bpy.types.Operator):
                     part_ctr += 1
                     part = t + 'part ' + str(part_ctr) + ' {' + n
                     part += t + t + 'name: ' + o.name + n
-                    offset = translate_vector3(o.location)
+                    offset = convert_vec3(o.location)
                     offset = f"{t.join(f'{v:.6f}' for v in offset)}"
                     part += t + t + 'offset: ' + offset + ' ' + n
                     part += t + '}' + n
@@ -919,10 +1029,10 @@ class MC2_OT_ExportProps(bpy.types.Operator):
                 row3 = (matrix[0][2], matrix[1][2], matrix[2][2])
                 row4 = (matrix[0][3], matrix[1][3], matrix[2][3])
 
-                row1 = t + t + vector3_to_string(round_vector3(row1), '\t') + ' ' + n
-                row2 = t + t + vector3_to_string(round_vector3(row2), '\t') + ' ' + n
-                row3 = t + t + vector3_to_string(round_vector3(row3), '\t') + ' ' + n
-                row4 = t + t + vector3_to_string(round_vector3(row4), '\t') + ' ' + n
+                row1 = t + t + vec3_to_string(round_vec3(row1), '\t') + ' ' + n
+                row2 = t + t + vec3_to_string(round_vec3(row2), '\t') + ' ' + n
+                row3 = t + t + vec3_to_string(round_vec3(row3), '\t') + ' ' + n
+                row4 = t + t + vec3_to_string(round_vec3(row4), '\t') + ' ' + n
 
                 matrix_end = t + t + e
 
@@ -952,6 +1062,27 @@ class MC2_OT_ExportProps(bpy.types.Operator):
         self.report({'INFO'}, f"Exported {map_name} props")
         return {'FINISHED'}
 
+class MC2_OT_ExportBounds(bpy.types.Operator):
+    bl_idname = "mc2.export_bounds"
+    bl_label = "Export Bounds"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        mc2_dir = context.scene.mc2_props.mc2_dir
+        map_name = context.scene.mc2_props.map_name
+        bound_col = create_get_collection(map_name + '_bound')
+        bnd_path = os.path.join(mc2_dir, 'bound', map_name + '.bnd')
+        quad_bnd_path = os.path.join(mc2_dir, 'bound', map_name + '_quad_0.bnd')
+
+        for o in bound_col.objects:
+            if o.name == map_name + '.bnd':
+                export_otgrid_bnd(o, bnd_path)
+                self.report({'INFO'}, f"Exported {map_name}.bnd")
+
+        #export_quadtree_bnd(quad_bnd_path)
+
+        return {'FINISHED'}
+
 classes = (
     MC2_OT_SetupScene,
     MC2_OT_ClearScene,
@@ -959,10 +1090,14 @@ classes = (
     MC2_OT_ImportCityModels,
     MC2_OT_ImportProps_Old,
     MC2_OT_ImportProps,
+    MC2_OT_ImportBounds,
     MC2_OT_SpawnCityModels,
     MC2_OT_SpawnProps,
     MC2_OT_ExportHoods,
     MC2_OT_ExportProps,
+    MC2_OT_ExportBounds,
+    MC2_OT_OpenCollection,
+    MC2_OT_CloseCollection,
 )
 
 def register():

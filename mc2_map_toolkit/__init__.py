@@ -1,8 +1,8 @@
 bl_info = {
     "name": "MC2 Map Toolkit",
     "author": "Redline",
-    "version": (0, 0, 1),
-    "blender": (2, 80, 0),
+    "version": (0, 1, 0),
+    "blender": (4, 5, 3),
     "location": "View3D > Sidebar > MC2 Map Toolkit",
     "description": "Set of tools for working with Midnight Club 2 maps",
     "category": "Object",
@@ -13,7 +13,7 @@ import os
 import importlib
 from . import operators
 
-from .utils import get_last_dir, get_last_map_name, write_file, validate_mc2_dir
+from .utils import get_last_dir, get_last_map_name, write_file, validate_mc2_dir, is_local_view
 
 # Reload support for development
 importlib.reload(operators)
@@ -66,7 +66,7 @@ class MC2Properties(bpy.types.PropertyGroup):
 # UI Panel
 
 class MC2_PT_MainPanel(bpy.types.Panel):
-    bl_label = "MC2 Map Editor"
+    bl_label = "MC2 Map Toolkit"
     bl_idname = "MC2_PT_main_panel"
     bl_space_type = "VIEW_3D"
     bl_region_type = "UI"
@@ -78,35 +78,51 @@ class MC2_PT_MainPanel(bpy.types.Panel):
 
         layout.prop(props, "mc2_dir")
 
-        valid, msg = validate_mc2_dir(props.mc2_dir)
-        if not valid:
+        # Validators
+        valid_dir, msg = validate_mc2_dir(props.mc2_dir)
+        if not valid_dir:
             row = layout.row()
             row.alert = True
             row.label(text=f"{msg}", icon="ERROR")
+
+        #valid_col_inst = validate_col_inst()
+        local_view = is_local_view(context)
 
         layout.prop(props, "map_name")
 
         layout.separator()
 
-        row = layout.column()
-        #row.enabled = valid
-        row.operator("mc2.setup_scene")
-        row.operator("mc2.clear_scene")
-        row.operator("mc2.restore_backup")
-        row.separator()
+        box = layout.box()
+        #box.enabled = valid
+        box.label(text="Setup", icon="SCENE_DATA")
+        box.operator("mc2.setup_scene")
+        box.operator("mc2.clear_scene")
+        box.operator("mc2.restore_backup")
 
-        row.operator("mc2.import_city_models")
-        row.operator("mc2.import_props")
-        row.separator()
+        box = layout.box()
+        box.label(text="Import", icon="IMPORT")
+        box.operator("mc2.import_city_models")
+        box.operator("mc2.import_props")
+        box.operator("mc2.import_bounds")
 
-        row.operator("mc2.spawn_city_models")
-        row.operator("mc2.spawn_props")
-        row.separator()
+        box = layout.box()
+        box.operator("mc2.spawn_city_models")
+        box.operator("mc2.spawn_props")
 
-        # Some kind of validate operator here?
+        box = layout.box()
+        box.label(text="Utilities", icon="TOOL_SETTINGS")
+        if local_view == False:
+            box.operator("mc2.open_collection")
+        elif local_view == True:
+            box.operator("mc2.close_collection")
 
-        row.operator("mc2.export_hoods")
-        row.operator("mc2.export_props")
+        # Some kind of map validator operator here?
+
+        box = layout.box()
+        box.label(text="Export", icon="EXPORT")
+        box.operator("mc2.export_hoods")
+        box.operator("mc2.export_props")
+        box.operator("mc2.export_bounds")
 
 # Registration
 

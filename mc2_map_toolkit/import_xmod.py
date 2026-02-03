@@ -1,6 +1,6 @@
 import bpy, bmesh
 import os
-from .utils import translate_vector3, translate_uv, try_load_texture
+from .utils import convert_vec3, convert_uv, try_load_texture
 #from bpy_extras import node_shader_utils
 
 class ModMaterial:
@@ -96,12 +96,12 @@ def import_xmod(filepath, has_xbcpv = True):
         for l_idx, l in enumerate(lines):
             if l.startswith('v\t'): # Read and add verts
                 tok = l.split()
-                vert = translate_vector3((float(tok[1]), float(tok[2]), float(tok[3])))
+                vert = convert_vec3((float(tok[1]), float(tok[2]), float(tok[3])))
                 verts.append(vert)
             
             if l.startswith('n\t'): # Read normals
                 tok = l.split()
-                normals.append(translate_vector3((float(tok[1]), float(tok[2]), float(tok[3]))))
+                normals.append(convert_vec3((float(tok[1]), float(tok[2]), float(tok[3]))))
             
             if l.startswith('c\t'): # Read colors
                 tok = l.split()
@@ -109,7 +109,7 @@ def import_xmod(filepath, has_xbcpv = True):
                 
             if l.startswith('t1\t'): # Read UVs
                 tok = l.split()
-                tex1s.append(translate_uv((float(tok[1]), float(tok[2]))))
+                tex1s.append(convert_uv((float(tok[1]), float(tok[2]))))
             
             if l.startswith('mtl'): # Read materials
                 mod_mat = ModMaterial()
